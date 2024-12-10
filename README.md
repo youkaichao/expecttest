@@ -17,7 +17,7 @@ The general recipe for how to use this is as follows:
   1. Write your test and use `assertExpectedInline()` instead of a normal
      `assertEqual`.  Leave the expected argument blank with an empty string:
      ```py
-     self.assertExpectedInline(some_func(), "")
+     self.assertExpectedInline(some_func(), """""")
      ```
 
   2. Run your test.  It should fail, and you get an error message about
@@ -26,8 +26,9 @@ The general recipe for how to use this is as follows:
   3. Rerun the test with `EXPECTTEST_ACCEPT=1`.  Now the previously blank string
      literal will contain the expected value of the test.
      ```py
-     self.assertExpectedInline(some_func(), "my_value")
+     self.assertExpectedInline(some_func(), """my_value""")
      ```
+
 ## A minimal working example
 
 ```python
@@ -60,6 +61,22 @@ def test_split():
 Run `EXPECTTEST_ACCEPT=1 pytest test.py` , and the content in triple-quoted string
 will be automatically updated.
 
+For parameterized tests, advanced fixturing and other cases where the
+expectation is in a different place than the assertion, use `Expect`:
+
+```python
+from expecttest import Expect
+
+def test_removing_spaces(s: str, expected: Expect) -> None:
+    expected.assert_expected(s.replace(" ", ""))
+
+test_removing_spaces("foo bar", Expect("""foobar"""))
+test_removing_spaces("foo bar !!", Expect(""""""))
+```
+
+Run `EXPECTTEST_ACCEPT=1 pytest test.py` , and the content in triple-quoted string
+will be automatically updated.
+
 ## Some tips and tricks
 
   - Often, you will want to expect test on a multiline string.  This framework
@@ -69,3 +86,7 @@ will be automatically updated.
   - Take some time thinking about how exactly you want to design the output
     format of the expect test.  It is often profitable to design an output
     representation specifically for expect tests.
+
+## Similar libraries
+
+- [expect-test](https://docs.rs/expect-test) for Rust

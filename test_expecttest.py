@@ -9,7 +9,9 @@ import traceback
 import unittest
 import tempfile
 import runpy
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Generator
+from contextlib import contextmanager
+from pathlib import Path
 
 import hypothesis
 from hypothesis.strategies import booleans, composite, integers, sampled_from, text
@@ -40,6 +42,18 @@ def text_lineno(draw: Any) -> Tuple[str, int]:
     t = draw(text("a\n"))
     lineno = draw(integers(min_value=1, max_value=t.count("\n") + 1))
     return (t, lineno)
+
+
+@contextmanager
+def smoketest(name: str) -> Generator[str, None, None]:
+    with tempfile.TemporaryDirectory() as d:
+        dst = Path(d) / "test.py"
+        code_dir = Path(__file__).parent
+        shutil.copy(
+            code_dir / "smoketests" / name,
+            dst,
+        )
+        yield str(dst)
 
 
 class TestExpectTest(expecttest.TestCase):
@@ -164,62 +178,45 @@ c"""
             self.assertEqual(tb1[0].lineno + 1 + 2, tb2[0].lineno)
 
     def test_smoketest_accept_twice(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            dst = os.path.join(d, "test.py")
-            shutil.copy(
-                os.path.join(os.path.dirname(__file__), "smoketests/accept_twice.py"),
-                dst,
-            )
-            r = sh(dst)
+        with smoketest("accept_twice.py") as test_py:
+            r = sh(test_py)
             self.assertNotEqual(r.returncode, 0)
-            r = sh(dst, accept=True)
+            r = sh(test_py, accept=True)
             self.assertExpectedInline(
-                r.stdout.replace(dst, "test.py"),
+                r.stdout.replace(test_py, "test.py"),
                 """\
 Accepting new output for __main__.Test.test_a at test.py:10
 Skipping already accepted output for __main__.Test.test_a at test.py:10
 Accepting new output for __main__.Test.test_b at test.py:21
 """,
             )
-            r = sh(dst)
+            r = sh(test_py)
             self.assertEqual(r.returncode, 0)
 
     def test_smoketest_no_unittest(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            dst = os.path.join(d, "test.py")
-            shutil.copy(
-                os.path.join(os.path.dirname(__file__), "smoketests/no_unittest.py"),
-                dst,
-            )
-            r = sh(dst)
+        with smoketest("no_unittest.py") as test_py:
+            r = sh(test_py)
             self.assertNotEqual(r.returncode, 0)
-            r = sh(dst, accept=True)
+            r = sh(test_py, accept=True)
             self.assertExpectedInline(
-                r.stdout.replace(dst, "test.py"),
+                r.stdout.replace(str(test_py), "test.py"),
                 """\
 Accepting new output at test.py:5
 """,
             )
-            r = sh(dst)
+            r = sh(test_py)
             self.assertEqual(r.returncode, 0)
 
     def test_smoketest_accept_twice_reload(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            dst = os.path.join(d, "test.py")
-            shutil.copy(
-                os.path.join(
-                    os.path.dirname(__file__), "smoketests/accept_twice_reload.py"
-                ),
-                dst,
-            )
+        with smoketest("accept_twice_reload.py") as test_py:
             env = os.environ.copy()
             try:
                 os.environ["EXPECTTEST_ACCEPT"] = "1"
-                runpy.run_path(dst)
-                expecttest.EDIT_HISTORY.reload_file(dst)
+                runpy.run_path(test_py)
+                expecttest.EDIT_HISTORY.reload_file(test_py)
                 try:
                     expecttest._TEST1 = True  # type: ignore[attr-defined]
-                    runpy.run_path(dst)
+                    runpy.run_path(test_py)
                 finally:
                     delattr(expecttest, "_TEST1")
             finally:
@@ -227,35 +224,42 @@ Accepting new output at test.py:5
                 os.environ.update(env)
 
             # Should pass
-            runpy.run_path(dst)
+            runpy.run_path(test_py)
             try:
                 expecttest._TEST1 = True  # type: ignore[attr-defined]
-                runpy.run_path(dst)
+                runpy.run_path(test_py)
             finally:
                 delattr(expecttest, "_TEST1")
 
     def test_smoketest_accept_twice_clobber(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            dst = os.path.join(d, "test.py")
-            shutil.copy(
-                os.path.join(
-                    os.path.dirname(__file__), "smoketests/accept_twice_clobber.py"
-                ),
-                dst,
-            )
+        with smoketest("accept_twice_clobber.py") as test_py:
             env = os.environ.copy()
             try:
                 os.environ["EXPECTTEST_ACCEPT"] = "1"
-                runpy.run_path(dst)
-                expecttest.EDIT_HISTORY.reload_file(dst)
+                runpy.run_path(test_py)
+                expecttest.EDIT_HISTORY.reload_file(test_py)
                 try:
                     expecttest._TEST2 = True  # type: ignore[attr-defined]
-                    self.assertRaises(AssertionError, lambda: runpy.run_path(dst))
+                    self.assertRaises(AssertionError, lambda: runpy.run_path(test_py))
                 finally:
                     delattr(expecttest, "_TEST2")
             finally:
                 os.environ.clear()
                 os.environ.update(env)
+
+    def test_smoketest_expected_objects(self) -> None:
+        with smoketest("accept_expected.py") as test_py:
+            r = sh(test_py)
+            self.assertNotEqual(r.returncode, 0)
+            r = sh(test_py, accept=True)
+            self.assertExpectedInline(
+                r.stdout.replace(test_py, "test.py"),
+                """\
+Accepting new output at test.py:5
+""",
+            )
+            r = sh(test_py)
+            self.assertEqual(r.returncode, 0)
 
 
 def load_tests(
